@@ -1,6 +1,7 @@
 // Load environment variables from .env file
 require("dotenv").config();
 
+const fs = require("fs");
 const WebSocket = require("ws");
 const pgp_lib = require("pg-promise");
 const monitor = require("pg-monitor");
@@ -28,6 +29,7 @@ const geometryCache = new Map();
 const trainDataBuffer = new Map();
 const trainProcessingTimers = new Map();
 let heartbeatInterval = null;
+let locomotiveTypeRules = {};
 
 // --- pg-promise Configuration ---
 const cn = {
@@ -121,22 +123,50 @@ function getGeometryCanonicalString(gpsData) {
   return `${lat}:${lon}:${sp}:${be}`;
 }
 
+/**
+ * Determines the locomotive type based on the loaded rules.
+ * @param {string} vehicleNumber The vehicle number to check.
+ * @returns {string|null} The locomotive type or null if no match is found.
+ */
+function getLocomotiveType(vehicleNumber) {
+  const num = parseInt(vehicleNumber, 10);
+  if (isNaN(num)) {
+    return null;
+  }
+
+  for (const type in locomotiveTypeRules) {
+    const rules = locomotiveTypeRules[type];
+    // Check ranges first
+    for (const range of rules.ranges) {
+      if (num >= range.start && num <= range.end) {
+        return type;
+      }
+    }
+    // Then check single numbers
+    if (rules.singles.has(num)) {
+      return type;
+    }
+  }
+  return null;
+}
+
 // --- Database Update Functions ---
 async function upsertBasicFormation(vehicleNumber, formation, timestamp) {
   if (!formation) return;
   try {
+    const locomotiveType = getLocomotiveType(vehicleNumber);
     const insertData = {
       departure_date: formation.departureDate,
       train_number: formation.trainNumber,
       vehicle_number: vehicleNumber,
-      locomotive_type: null,
+      locomotive_type: locomotiveType,
       last_modified: timestamp,
     };
     const cs = new pgp.helpers.ColumnSet(Object.keys(insertData), {
       table: new pgp.helpers.TableName({ table: "oxyfi", schema: "trafiklab" }),
     });
     const onConflict =
-      " ON CONFLICT (departure_date, train_number, vehicle_number) DO UPDATE SET last_modified = EXCLUDED.last_modified";
+      " ON CONFLICT (departure_date, train_number, vehicle_number) DO UPDATE SET last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
     const query = pgp.helpers.insert(insertData, cs) + onConflict;
     await db.none(query);
   } catch (error) {
@@ -154,12 +184,13 @@ async function updateFormationWithLocation(
 ) {
   if (!formation) return;
   try {
+    const locomotiveType = getLocomotiveType(vehicleNumber);
     const insertData = {
       departure_date: formation.departureDate,
       train_number: formation.trainNumber,
       vehicle_number: vehicleNumber,
       location: location,
-      locomotive_type: null,
+      locomotive_type: locomotiveType,
       last_modified: timestamp,
     };
     const cs = new pgp.helpers.ColumnSet(Object.keys(insertData), {
@@ -167,7 +198,7 @@ async function updateFormationWithLocation(
     });
     const onConflict =
       " ON CONFLICT (departure_date, train_number, vehicle_number) DO UPDATE SET " +
-      "location = EXCLUDED.location, last_modified = EXCLUDED.last_modified";
+      "location = EXCLUDED.location, last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
     const query = pgp.helpers.insert(insertData, cs) + onConflict;
     await db.none(query);
   } catch (error) {
@@ -390,6 +421,40 @@ async function main() {
     process.exit(1);
   }
   console.log("✅ Environment variables loaded.");
+
+  // --- Load and PRE-COMPILE locomotive type rules at startup ---
+  try {
+    const fileContent = fs.readFileSync("./locomotive_types.json", "utf8");
+    const rawRules = JSON.parse(fileContent);
+
+    // Process the raw rules into a more efficient structure
+    for (const type in rawRules) {
+      locomotiveTypeRules[type] = {
+        ranges: [],
+        singles: new Set(), // Using a Set for fast lookups
+      };
+
+      rawRules[type].forEach((rule) => {
+        if (rule.includes("-")) {
+          const [start, end] = rule.split("-").map((n) => parseInt(n, 10));
+          if (!isNaN(start) && !isNaN(end)) {
+            locomotiveTypeRules[type].ranges.push({ start, end });
+          }
+        } else {
+          const num = parseInt(rule, 10);
+          if (!isNaN(num)) {
+            locomotiveTypeRules[type].singles.add(num);
+          }
+        }
+      });
+    }
+    console.log("✅ Locomotive type rules loaded and compiled successfully.");
+  } catch (error) {
+    console.error("[FATAL] Could not load or parse locomotive_types.json.");
+    console.error("Error details:", error.message);
+    process.exit(1);
+  }
+
   console.log(
     `Connecting to Tile38 at ${process.env.TILE38_HOST || "127.0.0.1"}:${
       process.env.TILE38_PORT || "9851"
