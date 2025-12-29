@@ -166,7 +166,8 @@ async function upsertBasicFormation(vehicleNumber, formation, timestamp) {
       table: new pgp.helpers.TableName({ table: "oxyfi", schema: "trafiklab" }),
     });
     const onConflict =
-      " ON CONFLICT (departure_date, train_number, vehicle_number) DO UPDATE SET last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
+      " ON CONFLICT (departure_date, train_number, location) DO UPDATE SET " +
+      "vehicle_number = EXCLUDED.vehicle_number, last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
     const query = pgp.helpers.insert(insertData, cs) + onConflict;
     await db.none(query);
   } catch (error) {
