@@ -4,11 +4,11 @@ require("dotenv").config();
 const fs = require("fs");
 const WebSocket = require("ws");
 const pgp_lib = require("pg-promise");
-const monitor = require("pg-monitor");
+//const monitor = require("pg-monitor");
 const Redis = require("ioredis");
 
 const initOptions = {};
-monitor.attach(initOptions);
+//monitor.attach(initOptions);
 const pgp = pgp_lib(initOptions);
 
 // --- Configuration ---
