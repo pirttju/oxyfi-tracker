@@ -197,8 +197,8 @@ async function updateFormationWithLocation(
       table: new pgp.helpers.TableName({ table: "oxyfi", schema: "trafiklab" }),
     });
     const onConflict =
-      " ON CONFLICT (departure_date, train_number, vehicle_number) DO UPDATE SET " +
-      "location = EXCLUDED.location, last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
+      " ON CONFLICT (departure_date, train_number, location) DO UPDATE SET " +
+      "vehicle_number = EXCLUDED.vehicle_number, last_modified = EXCLUDED.last_modified, locomotive_type = EXCLUDED.locomotive_type";
     const query = pgp.helpers.insert(insertData, cs) + onConflict;
     await db.none(query);
   } catch (error) {
@@ -289,9 +289,10 @@ function connect() {
       const newFormationString = getFormationsCanonicalString(formations);
       const cachedFormationString = formationCache.get(vehicleNumber);
       if (newFormationString !== cachedFormationString) {
-        console.log(
-          `[Cache-DB] Formation change for ${vehicleNumber}. Updating DB.`
-        );
+        // Commented out for production
+        //console.log(
+        //  `[Cache-DB] Formation change for ${vehicleNumber}. Updating DB.`
+        //);
         // Update cache before doing anything to avoid a race condition in case of rapid successive messages
         formationCache.set(vehicleNumber, newFormationString);
         for (const formation of formations) {
